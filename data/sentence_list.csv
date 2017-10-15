@@ -1,4 +1,4 @@
-"showname","url","sentences","word.count","anger","anticipation","disgust","fear","joy","sadness","surprise","trust","negative","positive","sent.id"
+"File","url","sentences","word.count","anger","anticipation","disgust","fear","joy","sadness","surprise","trust","negative","positive","sent.id"
 "rhonyc_801","http://174.129.13.43/mediatest/rhonyc/rhonyc_801.srt","966 - This season on The Real Housewives of New York City|",10,0,0,0,0,0,0,0,0.0999000999000999,0,0.0999000999000999,3
 "rhonyc_801","http://174.129.13.43/mediatest/rhonyc/rhonyc_801.srt","101 - Oh, my God.",3,0,0.332225913621262,0,0.332225913621262,0.332225913621262,0,0,0.332225913621262,0,0.332225913621262,6
 "rhonyc_801","http://174.129.13.43/mediatest/rhonyc/rhonyc_801.srt","We're in the Post.",4,0,0,0,0,0,0,0,0,0,0,7
