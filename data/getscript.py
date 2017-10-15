@@ -1,10 +1,3 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Oct 14 06:52:02 2017
-
-@author: GraceG
-"""
 #read script from a .srt file
 import urllib.request, urllib.parse, urllib.error
 url = input('url>')#input the url of script
