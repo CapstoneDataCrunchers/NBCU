@@ -1,0 +1,471 @@
+---
+title: "General Sense of Dataset"
+output: html_notebook
+    toc: true
+    toc_depth: 2
+---
+
+# Step 0: check and install needed packages. Load the libraries and functions. 
+```{r, message=FALSE, warning=FALSE}
+packages.used=c("rvest", "tibble", "qdap", 
+                "sentimentr", "gplots", "dplyr",
+                "tm", "syuzhet", "factoextra", 
+                "beeswarm", "scales", "RColorBrewer",
+                "RANN", "tm", "topicmodels")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library("rvest")
+library("tibble")
+# You may need to run
+# sudo ln -f -s $(/usr/libexec/java_home)/jre/lib/server/libjvm.dylib /usr/local/lib
+# in order to load qdap
+library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("tm")
+library("syuzhet")
+library("factoextra")
+library("beeswarm")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("tm")
+library("topicmodels")
+
+source("../lib/plotstacked.R")
+source("../lib/showFuncs.R")
+```
+
+This notebook was prepared with the following environmental settings.
+```{r}
+print(R.version)
+```
+
+
+# Step 1: Load Data
+```{r}
+show.list=read.csv("../data/shownamelist.csv", stringsAsFactors = FALSE)
+```
+
+Based on the list of showes, we scrap the main text part of the transcript's html page. For simple html pages of this kind,  [Selectorgadget](http://selectorgadget.com/) is very convenient for identifying the html node that `rvest` can use to scrap its content. For reproducibility, we also save our scrapped showes into our local folder as individual show files. 
+
+```{r}
+# Loop over each row in show.list
+show.list$fulltext=NA
+for(i in seq(nrow(show.list))) {
+  text <- read_html(show.list$url[i]) %>% # load the page
+    #html_nodes(".displaytext") %>% # isloate the text
+    html_text() # get the text
+  show.list$fulltext[i]=text
+  # Create the file name
+  filename <- paste0("../data/script/", 
+                     show.list$showname[i],
+                     ".txt")
+  sink(file = filename) %>% # open file to write 
+  cat(text)  # write the file
+  sink() # close the file
+}
+```
+
+# Step 2: data Processing --- generate list of sentences
+
+We will use sentences as units of analysis for this project, as sentences are natural languge units for organizing thoughts and ideas. For each extracted sentence, we apply sentiment analysis using [NRC sentiment lexion](http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm). "The NRC Emotion Lexicon is a list of English words and their associations with eight basic emotions (anger, fear, anticipation, trust, surprise, sadness, joy, and disgust) and two sentiments (negative and positive). The annotations were manually done by crowdsourcing."
+
+We assign an sequential id to each sentence in a show (`sent.id`) and also calculated the number of words in each sentence as *sentence length* (`word.count`).
+
+```{r, message=FALSE, warning=FALSE}
+sentence.list=NULL
+for(i in 1:nrow(show.list)){
+  sentences=sent_detect(show.list$fulltext[i],
+                        endmarks = c("?", ".", "!", "|",";"))
+  if(length(sentences)>0){
+    emotions=get_nrc_sentiment(sentences)
+    word.count=word_count(sentences)
+    # colnames(emotions)=paste0("emo.", colnames(emotions))
+    # in case the word counts are zeros?
+    emotions=diag(1/(word.count+0.01))%*%as.matrix(emotions)
+    sentence.list=rbind(sentence.list, 
+                        cbind(show.list[i,-ncol(show.list)],
+                              sentences=as.character(sentences), 
+                              word.count,
+                              emotions,
+                              sent.id=1:length(sentences)
+                              )
+    )
+  }
+}
+
+```
+
+Some non-sentences exist in raw data due to erroneous extra end-of-sentence marks. 
+```{r}
+sentence.list=
+  sentence.list%>%
+  filter(!is.na(word.count)) 
+sentence.list = sentence.list[sentence.list$word.count <= 70, ]
+
+#write.csv(sentence.list, "sentence_list.csv", row.names=FALSE)
+```
+
+# Step 3: Data analysis --- length of sentences
+```{r}
+sel.comparison=c("rhonyc_801","rhonyc_802","rhonyc_803","YSHR_01011H","YSHR_01012H","YSHR_01013H","GFG_EPS301","GFG_EPS302","GFG_EPS303")
+```
+## Overview of sentence length distribution
+```{r, fig.width = 3, fig.height = 3}
+
+par(mar=c(4, 11, 2, 2))
+
+#sel.comparison=levels(sentence.list$File)
+sentence.list.sel=filter(sentence.list, 
+                        File%in%sel.comparison)
+sentence.list.sel$File=factor(sentence.list$File)
+
+sentence.list.sel$FileOrdered=reorder(sentence.list.sel$File, 
+                                  sentence.list.sel$word.count, 
+                                  mean, 
+                                  order=T)
+
+beeswarm(word.count~FileOrdered, 
+         data=sentence.list.sel,
+         horizontal = TRUE, 
+         pch=16, col=alpha(brewer.pal(9, "Set1"), 0.6), 
+         cex=0.55, cex.axis=0.8, cex.lab=0.8,
+         spacing=5/nlevels(sentence.list.sel$FileOrdered),
+         las=2, xlab="Number of words in a sentence.", ylab="",
+         main="Shows")
+
+```
+
+# Step 4: Data analysis --- sentiment analsis
+## Sentence length variation over the course of the show, with emotions. 
+```{r, fig.height=2.5, fig.width=2}
+par(mfrow=c(3,3))
+
+f.plotsent.len(In.list=sentence.list, InFile="rhonyc_801")
+f.plotsent.len(In.list=sentence.list, InFile="rhonyc_802")
+f.plotsent.len(In.list=sentence.list, InFile="rhonyc_803")
+
+f.plotsent.len(In.list=sentence.list, InFile="YSHR_01011H")
+f.plotsent.len(In.list=sentence.list, InFile="YSHR_01012H")
+f.plotsent.len(In.list=sentence.list, InFile="YSHR_01013H")
+
+f.plotsent.len(In.list=sentence.list, InFile="GFG_EPS301")
+f.plotsent.len(In.list=sentence.list, InFile="GFG_EPS302")
+f.plotsent.len(In.list=sentence.list, InFile="GFG_EPS302")
+```
+
+### What are the emotionally charged sentences?
+```{r}
+#print("rhonyc_801")
+show.df=tbl_df(sentence.list)%>%
+  filter(File=="rhonyc_801", word.count>=4)%>%
+  select(sentences, anger:trust)
+show.df=as.data.frame(show.df)
+as.character(show.df$sentences[apply(show.df[,-1], 2, which.max)])
+
+```
+
+# Step 5: Clustering
+## Clustering of emotions
+```{r, fig.width=2, fig.height=2}
+heatmap.2(cor(sentence.list%>%filter(File=="rhonyc_801")%>%select(anger:trust)), 
+          scale = "none", 
+          col = bluered(100), , margin=c(6, 6), key=F,
+          trace = "none", density.info = "none")
+
+par(mar=c(4, 6, 2, 1))
+emo.means=colMeans(select(sentence.list, anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="Inaugural showes")
+```
+
+```{r, fig.height=3.3, fig.width=3.7}
+presid.summary=tbl_df(sentence.list)%>%
+  filter(File%in%sel.comparison)%>%
+  #group_by(paste0(type, File))%>%
+  group_by(File)%>%
+  summarise(
+    anger=mean(anger),
+    anticipation=mean(anticipation),
+    disgust=mean(disgust),
+    fear=mean(fear),
+    joy=mean(joy),
+    sadness=mean(sadness),
+    surprise=mean(surprise),
+    trust=mean(trust)
+    #negative=mean(negative),
+    #positive=mean(positive)
+  )
+
+presid.summary=as.data.frame(presid.summary)
+rownames(presid.summary)=as.character((presid.summary[,1]))
+km.res=kmeans(presid.summary[,-1], iter.max=200,
+              5)
+fviz_cluster(km.res, 
+             stand=F, repel= TRUE,
+             data = presid.summary[,-1], xlab="", xaxt="n",
+             show.clust.cent=FALSE)
+```
+
+# Step 6: Data analysis --- Topic modeling
+
+For topic modeling, we prepare a corpus of sentence snipets as follows. For each show, we start with sentences and prepare a snipet with a given sentence with the flanking sentences. 
+
+```{r}
+corpus.list=sentence.list[2:(nrow(sentence.list)-1), ]
+sentence.pre=sentence.list$sentences[1:(nrow(sentence.list)-2)]
+sentence.post=sentence.list$sentences[3:(nrow(sentence.list)-1)]
+corpus.list$snipets=paste(sentence.pre, corpus.list$sentences, sentence.post, sep=" ")
+#rm.rows=(1:nrow(corpus.list))[corpus.list$sent.id==1]
+#rm.rows=c(rm.rows, rm.rows-1)
+#corpus.list=corpus.list[-rm.rows, ]
+```
+
+## Text mining
+```{r}
+docs <- Corpus(VectorSource(corpus.list$snipets))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+```
+
+### Text basic processing
+Adapted from <https://eight2late.wordpress.com/2015/09/29/a-gentle-introduction-to-topic-modeling-using-r/>.
+
+```{r}
+#remove potentially problematic symbols
+docs <-tm_map(docs,content_transformer(tolower))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#remove punctuation
+docs <- tm_map(docs, removePunctuation)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#Strip digits
+docs <- tm_map(docs, removeNumbers)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#remove stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#remove whitespace
+docs <- tm_map(docs, stripWhitespace)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+
+#Stem document
+docs <- tm_map(docs,stemDocument)
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+```
+
+### Topic modeling
+
+Gengerate document-term matrices. 
+
+```{r}
+dtm <- DocumentTermMatrix(docs)
+#convert rownames to filenames#convert rownames to filenames
+rownames(dtm) <- paste(corpus.list$type, corpus.list$File,
+                       corpus.list$Term, corpus.list$sent.id, sep="_")
+
+rowTotals <- apply(dtm , 1, sum) #Find the sum of words in each Document
+
+dtm  <- dtm[rowTotals> 0, ]
+corpus.list=corpus.list[rowTotals>0, ]
+
+```
+
+Run LDA
+
+```{r}
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 15
+
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+                                                 seed = seed, best=best,
+                                                 burnin = burnin, iter = iter, 
+                                                 thin=thin))
+#write out results
+#docs to topics
+ldaOut.topics <- as.matrix(topics(ldaOut))
+table(c(1:k, ldaOut.topics))
+write.csv(ldaOut.topics,file=paste("../out/LDAGibbs",k,"DocsToTopics.csv"))
+
+#top 6 terms in each topic
+ldaOut.terms <- as.matrix(terms(ldaOut,20))
+write.csv(ldaOut.terms,file=paste("../out/LDAGibbs",k,"TopicsToTerms.csv"))
+
+#probabilities associated with each topic assignment
+topicProbabilities <- as.data.frame(ldaOut@gamma)
+write.csv(topicProbabilities,file=paste("../out/LDAGibbs",k,"TopicProbabilities.csv"))
+```
+```{r}
+terms.beta=ldaOut@beta
+terms.beta=scale(terms.beta)
+topics.terms=NULL
+for(i in 1:k){
+  topics.terms=rbind(topics.terms, ldaOut@terms[order(terms.beta[i,], decreasing = TRUE)[1:7]])
+}
+topics.terms
+ldaOut.terms
+```
+
+Based on the most popular terms and the most salient terms for each topic, we can not assign a hashtag to each topic. So we here we temporarily keep the original name. This part require manual setup as the topics are likely to change. 
+
+```{r}
+topics.hash=c("Topic1", "Topic2", "Topic3", "Topic4", "Topic5", "Topic6", "Topic7", "Topic8", "Topic9", "Topic10", "Topic11", "Topic12", "Topic13", "Topic14", "Topic15")
+corpus.list$ldatopic=as.vector(ldaOut.topics)
+corpus.list$ldahash=topics.hash[ldaOut.topics]
+
+colnames(topicProbabilities)=topics.hash
+corpus.list.df=cbind(corpus.list, topicProbabilities)
+```
+
+## Clustering of topics
+```{r, fig.width=3, fig.height=4}
+par(mar=c(1,1,1,1))
+topic.summary=tbl_df(corpus.list.df)%>%
+              filter(File%in%sel.comparison)%>%
+              select(File, Topic1:Topic15)%>%
+              group_by(File)%>%
+              summarise_each(funs(mean))
+topic.summary=as.data.frame(topic.summary)
+rownames(topic.summary)=topic.summary[,1]
+   
+topic.plot=c(1, 13, 9, 11, 8, 3, 7)
+print(topics.hash[topic.plot])
+
+heatmap.2(as.matrix(topic.summary[,topic.plot+1]), 
+          scale = "column", key=F, 
+          col = bluered(100),
+          cexRow = 0.9, cexCol = 0.9, margins = c(8, 8),
+          trace = "none", density.info = "none")
+```
+
+
+```{r, fig.width=3.3, fig.height=5}
+par(mfrow=c(9,1), mar=c(1,1,2,0), bty="n", xaxt="n", yaxt="n")
+
+topic.plot=c(1, 13, 9, 11, 8, 3, 7)
+print(topics.hash[topic.plot])
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="rhonyc_801")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="rhonyc_801")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="rhonyc_802")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="rhonyc_802")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="rhonyc_803")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="rhonyc_803")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="YSHR_01011H")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="YSHR_01011H")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="YSHR_01012H")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="YSHR_01012H")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="YSHR_01013H")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="YSHR_01013H")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="GFG_EPS301")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="GFG_EPS301")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="GFG_EPS302")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="GFG_EPS302")
+
+show.df=tbl_df(corpus.list.df)%>%filter(File=="GFG_EPS303")%>%select(sent.id, Topic1:Topic15)
+show.df=as.matrix(show.df)
+show.df[,-1]=replace(show.df[,-1], show.df[,-1]<1/15, 0.001)
+show.df[,-1]=f.smooth.topic(x=show.df[,1], y=show.df[,-1])
+plot.stacked(show.df[,1], show.df[,topic.plot+1], 
+             xlab="Sentences", ylab="Topic share", main="GFG_EPS303")
+```
+
+
+
+```{r}
+show.df=tbl_df(corpus.list.df)%>%filter(word.count<60)%>%select(sentences, Topic1:Topic15)
+
+as.character(show.df$sentences[apply(as.data.frame(show.df[,-1]), 2, which.max)])
+
+names(show.df)[-1]
+
+```
+
+
+```{r, fig.width=3, fig.height=3}
+presid.summary=tbl_df(corpus.list.df)%>%
+  filter(File%in%sel.comparison)%>%
+  select(File, Topic1:Topic15)%>%
+  group_by(File)%>%
+  summarise_each(funs(mean))
+
+presid.summary=as.data.frame(presid.summary)
+rownames(presid.summary)=as.character((presid.summary[,1]))
+km.res=kmeans(scale(presid.summary[,-1]), iter.max=200,
+              5)
+fviz_cluster(km.res, 
+             stand=T, repel= TRUE,
+             data = presid.summary[,-1],
+             show.clust.cent=FALSE)
+```
+
+# Readings for NLP with Python
+
++ [Natural Language Processing with Python](http://www.nltk.org/book/)
++ [A shorter tutorial](https://www.digitalocean.com/community/tutorials/how-to-work-with-language-data-in-python-3-using-the-natural-language-toolkit-nltk)
++ [Sentiment analysis](https://pythonspot.com/en/python-sentiment-analysis/)
++ [Topic modeling](https://medium.com/@aneesha/topic-modeling-with-scikit-learn-e80d33668730)

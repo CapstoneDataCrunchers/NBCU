@@ -1,0 +1,197 @@
+---
+title: "Word cloud - Xiaowo Sun"
+output:
+  html_document: 
+    toc: true
+    toc_depth: 2
+  html_notebook: default
+---
+
+#Pre-work
+```{r}
+packages.used=c("SnowballC", "ggplot2", "rvest", "tibble", "qdap", 
+                "sentimentr", "gplots", "dplyr", "tm", "syuzhet", 
+                "factoextra", "scales", "RColorBrewer", "RANN", "tm",
+                "topicmodels","NLP","openNLP","magrittr","wordcloud",
+                "tidytext","stringr","data.table","shiny","XML","RCurl")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+
+# load packages
+library(SnowballC)
+library(dplyr)
+library(rvest)
+library(tibble)
+library(qdap)
+library(sentimentr)
+library(gplots)
+library(ggplot2)
+library(syuzhet)
+library(factoextra)
+library(scales)
+library(RColorBrewer)
+library(RANN)
+library(tm)
+library(topicmodels)
+library(NLP)
+library(openNLP)
+library(magrittr)
+library(wordcloud)
+library(tidytext)
+library(stringr)
+library(shiny)
+library(data.table)
+library(XML)
+library(RCurl)
+```
+
+This notebook was prepared with the following environmental settings.
+```{r}
+print(R.version)
+```
+
+## 1.Load Scripts
+```{r}
+##rhonyc corpus
+rhonyc.srt <- file.path("../data/script/rhonyc")
+rhonyc_txt <- VCorpus(DirSource(rhonyc.srt,encoding ="latin1"))
+rhonyc_txt
+##gfg corpus
+gfg.srt <- file.path("../data/script/gfg")
+gfg_txt <- VCorpus(DirSource(gfg.srt,encoding ="latin1"))
+gfg_txt
+##yshr
+yshr.srt <- file.path("../data/script/yshr")
+yshr_txt <- VCorpus(DirSource(yshr.srt,encoding ="latin1"))
+yshr_txt
+
+##stopwords
+st <- read.table("../data/script/st/stoplist.txt")
+st <- as.character(st$V1)
+st <- c(st, stopwords())
+```
+```{r}
+
+```
+
+## 2.Words Frequency
+### Get Nouns & Verbs
+```{r}
+## add tags to words
+tagPOS <-  function(x, ...) {
+  s <- as.String(x)
+  word_token_annotator <- Maxent_Word_Token_Annotator()
+  a2 <- Annotation(1L, "sentence", 1L, nchar(s))
+  a2 <- annotate(s, word_token_annotator, a2)
+  a3 <- annotate(s, Maxent_POS_Tag_Annotator(), a2)
+  a3w <- a3[a3$type == "word"]
+  POStags <- unlist(lapply(a3w$features, `[[`, "POS"))
+  POStagged <- paste(sprintf("%s/%s", s[a3w], POStags), collapse = " ")
+  list(POStagged = POStagged, POStags = POStags)
+}
+
+## extract tags
+extractPOS <- function(x, thisPOSregex) {
+    s <- as.String(x)
+    wordAnnotation <- annotate(s, list(Maxent_Sent_Token_Annotator(), Maxent_Word_Token_Annotator()))
+    POSAnnotation <- annotate(s, Maxent_POS_Tag_Annotator(), wordAnnotation)
+    POSwords <- subset(POSAnnotation, type == "word")
+    tags <- sapply(POSwords$features, '[[', "POS")
+    thisPOSindex <- grep(thisPOSregex, tags)
+    tokenizedAndTagged <- sprintf("%s/%s", x[POSwords][thisPOSindex], tags[thisPOSindex])
+    untokenizedAndTagged <- paste(tokenizedAndTagged, collapse = " ")
+    untokenizedAndTagged
+}
+
+#acqTag.rhonyc <- tagPOS(rhonyc_txt)
+#acqTag.gfg <- tagPOS(gfg_txt)
+#acqTag.yshr <- tagPOS(yshr)
+
+#rhonyc_NN <- lapply(rhonyc, extractPOS, "NN")
+#gfg_NN <- lapply(gfg, extractPOS, "NN")
+#yshr_NN <- lapply(yshr, extractPOS, "NN")
+
+
+## extract noun(#verb)
+get_key <- function(x) {
+
+    s <- tm_map(x, removePunctuation)
+    s <- tm_map(s, removeNumbers)
+    s <- tm_map(s, tolower)
+    s <- tm_map(s, removeWords, stopwords("english"))
+    s <- tm_map(s, removeWords, st)
+    s <- tm_map(s, removeWords, c("shes","theyr","youv","ive"))
+    s <- tm_map(s, stemDocument)
+    s <- tm_map(s, stripWhitespace)
+    s <- tm_map(s, PlainTextDocument)
+
+    nouns = c("/NN", "/NNS","/NNP","/NNPS")
+    #verbs = c("/VB","/VBD","/VBG","/VBN","/VBP","/VBZ")
+
+    s = gsub("\n","",s)
+    s = gsub('"',"",s)
+
+    tags = tagPOS(s)
+    tags = tags$POStagged
+    tags = unlist(strsplit(tags, split=","))
+
+    nouns_present = tags[grepl(paste(nouns, collapse = "|"), tags)]
+    nouns_present = unique(nouns_present)
+    #verbs_present = tags[grepl(paste(verbs, collapse = "|"), tags)]
+    #verbs_present = unique(verbs_present)
+    nouns_present<- gsub("^(.*?)/.*", "\\1", nouns_present)
+    #verbs_present = gsub("^(.*?)/.*", "\\1", verbs_present)
+    nouns_present = 
+    paste("'",as.character(nouns_present),"'",collapse=",",sep="")
+    #verbs_present = 
+    #paste("'",as.character(verbs_present),"'",collapse=",",sep="")
+    #l <- list(noun = nouns_present, verb = verbs_present)
+    l <- nouns_present
+    l <- gsub("'", "", l)
+    l <- gsub(" ", "", l)
+    l <- gsub("\\d", "", l)
+    l <- gsub("your", "", l)
+    l <- gsub("youv","",l)
+    l <- gsub("theyr","",l)
+    l <- gsub("ive","",l)
+    l <- strsplit(as.character(l), split = ",")
+    l
+}
+
+
+rhonyc_key <- get_key(rhonyc_txt)
+gfg_key <- get_key(gfg_txt)
+yshr_key <- get_key(yshr_txt)
+
+
+```
+
+### Wordcloud
+```{r}
+## create wordcloud
+#create_wordcloud <- function(x) {
+    s <- Corpus(VectorSource(rhonyc_key))
+    tdm <- TermDocumentMatrix(s)   
+    tdm.tidy=tidy(tdm)
+    tdm.tidy=tdm.tidy[-c(83,312,320),,]
+    tdm.overall=summarise(group_by(tdm.tidy, term), sum(count))
+    View(tdm.tidy)
+    
+    #generate the wordcloud
+    wordcloud(tdm.overall$term, tdm.overall$`sum(count)`, 
+              max.words=80, random.order=FALSE, random.color=FALSE,rot.per=0,colors=brewer.pal(5,"Reds")) 
+#}
+
+rhonyc_cloud <- create_wordcloud(rhonyc_key)
+gfg_cloud <- create_wordcloud(gfg_key)
+yshr_cloud <- create_wordcloud(yshr_key)
+
+```
+
